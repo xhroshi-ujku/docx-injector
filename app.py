@@ -1,7 +1,7 @@
 from flask import Flask, request, send_file, jsonify, abort
 import io, os, zipfile, traceback
-from xml.etree import ElementTree as ET
 from copy import deepcopy
+from lxml import etree as ET   # ✅ use lxml instead of xml.etree
 
 app = Flask(__name__)
 
@@ -47,64 +47,60 @@ def rebuild_docx_with_new_xml(template_bytes, new_xml):
 
 
 # ------------------------------------------------------------
-# 🧩 Placeholder Replacement Logic (Reliable XML-based)
+# 🧩 Placeholder Replacement Logic (using lxml)
 # ------------------------------------------------------------
 def replace_placeholder_in_xml(template_xml, placeholder, insert_xml):
-    """Reliable version: finds {{Permbajtja}} across split runs and replaces with full DOCX content."""
+    """Robust DOCX injection using lxml to preserve structure."""
     try:
         ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-        template_tree = ET.fromstring(template_xml)
-        insert_tree = ET.fromstring(insert_xml)
+        parser = ET.XMLParser(remove_blank_text=True)
+        template_tree = ET.fromstring(template_xml, parser)
+        insert_tree = ET.fromstring(insert_xml, parser)
 
-        # Convert to string for search
         xml_str = ET.tostring(template_tree, encoding="unicode")
-
         if placeholder not in xml_str:
-            print("⚠️ Placeholder not found in raw XML.")
+            print("⚠️ Placeholder not found.")
             return template_xml
 
-        # Iterate over paragraphs (<w:p>) to locate placeholder
-        for p in template_tree.findall(".//w:p", ns):
-            p_xml = ET.tostring(p, encoding="unicode")
-            if placeholder in p_xml:
+        # Iterate through paragraphs
+        for p in template_tree.xpath(".//w:p", namespaces=ns):
+            p_str = ET.tostring(p, encoding="unicode")
+            if placeholder in p_str:
                 print("✅ Found placeholder paragraph.")
-                parent = p.getparent()
-                idx = list(parent).index(p)
 
-                # Remove the paragraph containing the placeholder
+                parent = p.getparent()
+                idx = parent.index(p)
                 parent.remove(p)
 
-                # Extract <w:body> from source document
                 insert_body = insert_tree.find("w:body", ns)
                 if insert_body is None:
-                    print("⚠️ Source document has no body.")
+                    print("⚠️ Source DOCX missing <w:body>.")
                     return template_xml
 
-                # Insert content where placeholder was
-                for el in list(insert_body):
-                    parent.insert(idx, deepcopy(el))
+                for child in list(insert_body):
+                    parent.insert(idx, deepcopy(child))
                     idx += 1
 
-                print("✅ Placeholder replaced successfully.")
+                print("✅ Injection completed.")
                 return ET.tostring(template_tree, encoding="utf-8", xml_declaration=True)
 
         print("⚠️ Placeholder paragraph not found.")
         return template_xml
 
     except Exception as e:
-        print("❌ XML replacement error:", e)
+        print("❌ Replacement error:", e)
         print(traceback.format_exc())
         return template_xml
 
 
 # ------------------------------------------------------------
-# 🌐 API Routes
+# 🌐 API Endpoints
 # ------------------------------------------------------------
 @app.route("/", methods=["GET"])
 def root():
     return jsonify({
         "status": "ok",
-        "message": "DOCX Injector API (ZIP-based) is running",
+        "message": "DOCX Injector API (lxml version) is running",
         "endpoints": ["/inject-docx"]
     })
 
@@ -122,14 +118,14 @@ def inject_docx():
       - template: DOCX template file
       - source: DOCX source file
       - placeholder: optional string (default {{Permbajtja}})
-    Returns: a merged DOCX file
+    Returns: merged DOCX
     """
     try:
         print("FILES RECEIVED:", list(request.files.keys()))
         print("FORM RECEIVED:", dict(request.form))
 
         if "template" not in request.files or "source" not in request.files:
-            return jsonify({"error": "Both 'template' and 'source' files are required"}), 400
+            return jsonify({"error": "Both 'template' and 'source' are required"}), 400
 
         template_bytes = request.files["template"].read()
         source_bytes = request.files["source"].read()
@@ -159,7 +155,7 @@ def inject_docx():
 
 
 # ------------------------------------------------------------
-# 🚀 Run locally
+# 🚀 Run
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
