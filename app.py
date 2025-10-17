@@ -141,16 +141,13 @@ def merge_relationships_and_media(template_docx: bytes, source_docx: bytes, merg
 
         # Copy the target part if it is an internal target like "media/image1.png"
         if not target_mode:  # internal part
-            # Relationship targets are relative to "word/", so compute full part path
             part_path = "word/" + target
             try:
                 extra_files[part_path] = szip.read(part_path)
             except KeyError:
-                # If missing, ignore (hyperlinks go into external TargetMode, so it's fine)
-                pass
+                pass  # ignore missing targets
 
-    # Rewrite rIds inside merged document.xml
-    # We parse to XML and replace attributes cleanly
+    # ---- Rewrite rIds inside merged document.xml ----
     try:
         doc_root = ET.fromstring(merged_doc_xml)
         for el in doc_root.iter():
@@ -162,21 +159,22 @@ def merge_relationships_and_media(template_docx: bytes, source_docx: bytes, merg
                     el.set(attr, rid_map[el.attrib[attr]])
         merged_doc_xml = ET.tostring(doc_root, encoding="utf-8", xml_declaration=True)
     except Exception:
-        # Fallback: simple byte replace (should rarely be needed)
         for old, new in rid_map.items():
             merged_doc_xml = merged_doc_xml.replace(old.encode("utf-8"), new.encode("utf-8"))
 
-    # Serialize and normalize namespace prefix
-updated_rels_xml = ET.tostring(t_rels_root, encoding="utf-8", xml_declaration=True)
-
-# Word requires <Relationships> without ns0: prefix
-updated_rels_xml = (
-    updated_rels_xml
-    .replace(b"ns0:", b"")
-    .replace(b'xmlns:ns0="http://schemas.openxmlformats.org/package/2006/relationships"', b'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"')
-)
+    # ---- Serialize relationships with correct default namespace ----
+    updated_rels_xml = ET.tostring(t_rels_root, encoding="utf-8", xml_declaration=True)
+    updated_rels_xml = (
+        updated_rels_xml
+        .replace(b"ns0:", b"")
+        .replace(
+            b'xmlns:ns0="http://schemas.openxmlformats.org/package/2006/relationships"',
+            b'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"'
+        )
+    )
 
     return merged_doc_xml, extra_files, updated_rels_xml
+
 
 def rebuild_docx(template_bytes: bytes, updated_document_xml: bytes, extra_files: dict[str, bytes], updated_rels_xml: bytes) -> io.BytesIO:
     """
@@ -366,4 +364,5 @@ def debug_rels():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
