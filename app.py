@@ -62,41 +62,54 @@ def merge_split_runs(tree, ns):
 
 
 def replace_placeholder_in_xml(template_xml, source_xml, placeholder="{{Permbajtja}}"):
-    """Replace placeholder paragraph in template with content from source DOCX."""
+    """
+    Finds a split placeholder like {{Permbajtja}} in the template DOCX and
+    replaces it with all paragraphs from the source DOCX body — safely.
+    Keeps final XML structure valid.
+    """
     try:
         ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        ET.register_namespace("w", ns["w"])
+
         template_tree = ET.fromstring(template_xml)
         source_tree = ET.fromstring(source_xml)
 
-        body = template_tree.find(".//w:body", ns)
-        if body is None:
-            print("⚠️ Template has no <w:body>")
+        template_body = template_tree.find(".//w:body", ns)
+        source_body = source_tree.find(".//w:body", ns)
+
+        if template_body is None or source_body is None:
+            print("⚠️ Missing body in one of the DOCX files.")
             return template_xml
 
-        insert_body = source_tree.find(".//w:body", ns)
-        if insert_body is None:
-            print("⚠️ Source has no <w:body>")
-            return template_xml
+        # Extract source content except sectPr (Word section properties)
+        source_elems = [
+            deepcopy(el) for el in list(source_body)
+            if not el.tag.endswith("sectPr")
+        ]
 
-        # Find placeholder paragraph, even if split
+        # Locate the paragraph containing the placeholder (even if split)
         for p, full_text in merge_split_runs(template_tree, ns):
             if placeholder in full_text:
-                print(f"✅ Found placeholder '{placeholder}', replacing it.")
-                idx = list(body).index(p)
-                body.remove(p)
-                for el in list(insert_body):
-                    body.insert(idx, deepcopy(el))
+                print("✅ Found placeholder in paragraph; replacing content...")
+                idx = list(template_body).index(p)
+                template_body.remove(p)
+
+                # Insert each element from source
+                for el in source_elems:
+                    template_body.insert(idx, el)
                     idx += 1
-                print("✅ Replacement done.")
+
+                print("✅ Injection complete and structure preserved.")
                 return ET.tostring(template_tree, encoding="utf-8", xml_declaration=True)
 
-        print("⚠️ Placeholder not found in merged runs.")
+        print("⚠️ Placeholder not found.")
         return template_xml
 
     except Exception as e:
         print("❌ Replacement error:", e)
         print(traceback.format_exc())
         return template_xml
+
 
 
 # ------------------------------------------------------------
@@ -199,4 +212,5 @@ def debug_scan():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
