@@ -2,6 +2,7 @@ from flask import Flask, request, send_file, jsonify, abort
 from docx import Document
 import html2docx
 import io, os, json, traceback, re, html
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -19,55 +20,76 @@ def require_api_key():
 
 
 # --------------------------
-# 🧩 Helper function
+# 🧩 HTML Cleaning Function
 # --------------------------
-def clean_html(raw_html: str) -> str:
-    """Cleans SharePoint-style HTML for compatibility with html2docx."""
+def simplify_html(raw_html: str) -> str:
+    """Cleans and simplifies SharePoint-style HTML for compatibility with html2docx."""
     if not raw_html:
         return ""
 
-    # Decode HTML entities and remove problematic tags/classes
-    cleaned = html.unescape(raw_html)
-    cleaned = cleaned.replace("\\n", " ").replace("\n", " ")
-    cleaned = cleaned.replace("&#160;", " ").replace("&nbsp;", " ")
-    cleaned = cleaned.replace("&#58;", ":")
-    cleaned = re.sub(r'class="[^"]+"', "", cleaned)
-    cleaned = cleaned.replace("ExternalClass", "")
-    cleaned = cleaned.replace("<o:p>", "").replace("</o:p>", "")
-    cleaned = cleaned.replace("<br>", "<br/>").replace("<br />", "<br/>")
-    cleaned = cleaned.replace("<div>", "<p>").replace("</div>", "</p>")
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned
+    try:
+        # Decode entities
+        cleaned = html.unescape(raw_html)
+        cleaned = cleaned.replace("\\n", " ").replace("\n", " ")
+        cleaned = cleaned.replace("&#160;", " ").replace("&nbsp;", " ")
+        cleaned = cleaned.replace("&#58;", ":")
+        cleaned = cleaned.replace("<br>", "<br/>").replace("<br />", "<br/>")
+
+        # Parse with BeautifulSoup
+        soup = BeautifulSoup(cleaned, "html.parser")
+
+        # Remove all style, class, and span attributes
+        for tag in soup(True):
+            for attr in ["class", "style", "id", "lang", "width", "height", "align"]:
+                tag.attrs.pop(attr, None)
+
+        # Convert <div> → <p>
+        for div in soup.find_all("div"):
+            div.name = "p"
+
+        # Ensure table cells contain plain text
+        for td in soup.find_all("td"):
+            td.string = td.get_text(strip=True)
+
+        # Remove empty tags
+        for tag in soup.find_all():
+            if not tag.text.strip() and tag.name not in ["br", "p", "table", "tr", "td"]:
+                tag.decompose()
+
+        simplified_html = str(soup)
+        simplified_html = re.sub(r"\s+", " ", simplified_html).strip()
+        return simplified_html
+
+    except Exception as e:
+        print("❌ HTML simplification failed:", e)
+        print(traceback.format_exc())
+        return raw_html
 
 
+# --------------------------
+# 🧩 Placeholder Replacement
+# --------------------------
 def replace_placeholder_with_html(doc: Document, placeholder: str, html_content: str):
-    """
-    Finds and replaces placeholder text (even if split across runs)
-    with formatted HTML. Cleans the input HTML for compatibility.
-    """
-    html_content = clean_html(html_content)
+    """Replaces placeholder text (even across runs) with simplified HTML."""
+    html_content = simplify_html(html_content)
 
     for paragraph in doc.paragraphs:
-        # Combine all runs in the paragraph
         full_text = "".join(run.text for run in paragraph.runs)
         if placeholder in full_text:
             print(f"✅ Found placeholder: {placeholder}")
 
-            # Clear existing runs
             for run in paragraph.runs:
                 run.text = ""
 
-            # Convert HTML to a temporary Word doc
             tmp_doc = Document()
             try:
                 html2docx.add_html_to_document(html_content, tmp_doc)
             except Exception as err:
                 print("❌ HTML conversion error:", err)
                 print(traceback.format_exc())
-                tmp_doc.add_paragraph("[HTML conversion failed, inserted as plain text]")
+                tmp_doc.add_paragraph("[HTML conversion failed — inserted plain text]")
                 tmp_doc.add_paragraph(html_content)
 
-            # Insert new elements after the placeholder paragraph
             anchor = paragraph._p
             for block in tmp_doc.element.body:
                 anchor.addnext(block)
@@ -90,21 +112,9 @@ def root():
     })
 
 
-@app.route("/status", methods=["GET"])
-def status():
-    return jsonify({"service": "docx-injector", "ok": True})
-
-
 @app.route("/inject", methods=["POST"])
 def inject():
-    """
-    POST /inject
-    Multipart form-data:
-      - template: DOCX file
-      - placeholder: string (e.g. {{Permbajtja}})
-      - html: string (HTML content)
-    Returns a modified DOCX file.
-    """
+    """POST /inject"""
     try:
         print("FILES RECEIVED:", list(request.files.keys()))
         print("FORM RECEIVED:", dict(request.form))
@@ -114,11 +124,11 @@ def inject():
 
         template_file = request.files["template"]
         placeholder = request.form.get("placeholder", "{{Permbajtja}}")
-        html = request.form.get("html", "")
+        html_content = request.form.get("html", "")
 
         doc = Document(io.BytesIO(template_file.read()))
 
-        ok = replace_placeholder_with_html(doc, placeholder, html)
+        ok = replace_placeholder_with_html(doc, placeholder, html_content)
         if not ok:
             return jsonify({"error": f"Placeholder '{placeholder}' not found"}), 400
 
@@ -141,13 +151,7 @@ def inject():
 
 @app.route("/inject-multi", methods=["POST"])
 def inject_multi():
-    """
-    POST /inject-multi
-    Multipart form-data:
-      - template: DOCX file
-      - map: JSON array of objects [{"placeholder": "...", "html": "..."}]
-    Returns a modified DOCX with multiple replacements.
-    """
+    """POST /inject-multi"""
     try:
         print("FILES RECEIVED:", list(request.files.keys()))
         print("FORM RECEIVED:", dict(request.form))
