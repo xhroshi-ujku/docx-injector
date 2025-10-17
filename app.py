@@ -166,7 +166,16 @@ def merge_relationships_and_media(template_docx: bytes, source_docx: bytes, merg
         for old, new in rid_map.items():
             merged_doc_xml = merged_doc_xml.replace(old.encode("utf-8"), new.encode("utf-8"))
 
-    updated_rels_xml = ET.tostring(t_rels_root, encoding="utf-8", xml_declaration=True)
+    # Serialize and normalize namespace prefix
+updated_rels_xml = ET.tostring(t_rels_root, encoding="utf-8", xml_declaration=True)
+
+# Word requires <Relationships> without ns0: prefix
+updated_rels_xml = (
+    updated_rels_xml
+    .replace(b"ns0:", b"")
+    .replace(b'xmlns:ns0="http://schemas.openxmlformats.org/package/2006/relationships"', b'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"')
+)
+
     return merged_doc_xml, extra_files, updated_rels_xml
 
 def rebuild_docx(template_bytes: bytes, updated_document_xml: bytes, extra_files: dict[str, bytes], updated_rels_xml: bytes) -> io.BytesIO:
@@ -357,3 +366,4 @@ def debug_rels():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
