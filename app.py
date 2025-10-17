@@ -1,5 +1,6 @@
 from flask import Flask, request, send_file, jsonify, abort
 from docx import Document
+from copy import deepcopy
 import io, os, traceback
 
 app = Flask(__name__)
@@ -26,12 +27,12 @@ def require_api_key():
 
 
 # --------------------------
-# ⚙️ Helper functions
+# ⚙️ Helper function
 # --------------------------
 def replace_placeholder_with_docx_content(template_doc: Document, placeholder: str, source_doc: Document):
     """
-    Replace placeholder text in the template with all content from the source DOCX.
-    Keeps original formatting (paragraphs, runs, tables, etc.).
+    Safely replaces placeholder text in template_doc with all formatted content from source_doc.
+    Uses deepcopy to avoid shared XML references (prevents unreadable content errors).
     """
     for paragraph in template_doc.paragraphs:
         if placeholder in paragraph.text:
@@ -39,21 +40,20 @@ def replace_placeholder_with_docx_content(template_doc: Document, placeholder: s
             p = paragraph
             p.clear()
 
-            # Add text before placeholder if exists
             if before:
                 p.add_run(before)
                 p.add_run().add_break()
 
-            # Insert all elements (paragraphs, tables, etc.) from the source_doc
+            # Deep copy all content to preserve structure safely
             anchor = p._p
             for element in list(source_doc.element.body):
-                anchor.addnext(element)
+                anchor.addnext(deepcopy(element))
                 anchor = element
 
-            # Add text after placeholder if exists
             if after:
                 new_para = template_doc.add_paragraph(after)
                 anchor.addnext(new_para._p)
+
             return True
     return False
 
@@ -95,21 +95,21 @@ def inject_docx():
         source_file = request.files["source"]
         placeholder = request.form.get("placeholder", "{{Permbajtja}}")
 
-        # Load both DOCX files
+        # Load DOCX files safely
         template_doc = Document(io.BytesIO(template_file.read()))
         source_doc = Document(io.BytesIO(source_file.read()))
 
-        # Perform replacement
+        # Inject content
         ok = replace_placeholder_with_docx_content(template_doc, placeholder, source_doc)
         if not ok:
             return jsonify({"error": f"Placeholder '{placeholder}' not found in template"}), 400
 
-        # Save merged DOCX
+        # Save final DOCX in memory
         output = io.BytesIO()
         template_doc.save(output)
         output.seek(0)
 
-        # Return file
+        # Return the merged DOCX
         return send_file(
             output,
             as_attachment=True,
