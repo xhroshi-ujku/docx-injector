@@ -205,6 +205,54 @@ def debug_scan():
         print("❌ DEBUG error:", e)
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+@app.route("/debug-inject-test", methods=["POST"])
+def debug_inject_test():
+    """
+    Diagnostic route: uploads two DOCX files and shows internal results
+    without generating a DOCX — just text logs.
+    """
+    try:
+        if "template" not in request.files or "source" not in request.files:
+            return jsonify({"error": "Both 'template' and 'source' are required"}), 400
+
+        template_bytes = request.files["template"].read()
+        source_bytes = request.files["source"].read()
+        placeholder = request.form.get("placeholder", "{{Permbajtja}}")
+
+        from xml.etree import ElementTree as ET
+
+        # Extract XMLs
+        with zipfile.ZipFile(io.BytesIO(template_bytes)) as zt:
+            template_xml = zt.read("word/document.xml").decode("utf-8")
+
+        with zipfile.ZipFile(io.BytesIO(source_bytes)) as zs:
+            source_xml = zs.read("word/document.xml").decode("utf-8")
+
+        # Step A: check if placeholder exists
+        found_placeholder = placeholder in template_xml
+        found_fragments = "{{" in template_xml or "}}" in template_xml
+
+        # Step B: check if the source DOCX has a <w:body> and paragraphs
+        has_body = "<w:body" in source_xml
+        para_count = source_xml.count("<w:p")
+
+        # Step C: debug XML structure (only first lines)
+        sample_template = "\n".join(template_xml.splitlines()[:10])
+        sample_source = "\n".join(source_xml.splitlines()[:10])
+
+        return jsonify({
+            "found_placeholder_exact": found_placeholder,
+            "found_placeholder_fragments": found_fragments,
+            "source_body_present": has_body,
+            "source_paragraphs_count": para_count,
+            "template_snippet": sample_template,
+            "source_snippet": sample_source
+        })
+
+    except Exception as e:
+        print("❌ Debug error:", e)
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
 
 
 # ------------------------------------------------------------
@@ -212,5 +260,6 @@ def debug_scan():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
