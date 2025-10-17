@@ -306,10 +306,13 @@ def debug_rebuild():
         print("❌ Rebuild test failed:", e)
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+
 @app.route("/debug-extract-xml", methods=["POST"])
 def debug_extract_xml():
     """
-    Upload the injected.docx and extract its word/document.xml for inspection.
+    Upload a DOCX and extract both the start and end of word/document.xml
+    to detect malformed or duplicated closing tags (common corruption cause).
     """
     try:
         if "file" not in request.files:
@@ -318,19 +321,25 @@ def debug_extract_xml():
         docx_bytes = request.files["file"].read()
         with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
             xml_bytes = z.read("word/document.xml")
+        xml_str = xml_bytes.decode("utf-8", errors="ignore")
+
         return jsonify({
-            "xml_preview": xml_bytes.decode("utf-8", errors="ignore")[:2000],
-            "length": len(xml_bytes)
+            "length": len(xml_bytes),
+            "start": xml_str[:1500],
+            "end": xml_str[-1500:]
         })
+
     except Exception as e:
         print("❌ Debug extract error:", e)
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
 
 # ------------------------------------------------------------
 # 🚀 Run locally
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
