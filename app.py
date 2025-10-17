@@ -1,5 +1,5 @@
 from flask import Flask, request, send_file, jsonify, abort
-import io, os, zipfile, traceback
+import io, os, zipfile, traceback, re
 from xml.etree import ElementTree as ET
 from copy import deepcopy
 
@@ -13,6 +13,7 @@ API_KEY = os.environ.get(
     "eNdertuamFshatinEBemeQytetPartiNenaNenaJonePerjete1997"
 )
 
+
 @app.before_request
 def require_api_key():
     """Check API key for all routes except root and status."""
@@ -22,6 +23,7 @@ def require_api_key():
     if key != API_KEY:
         abort(401, description="Invalid or missing API key")
 
+
 # ------------------------------------------------------------
 # ⚙️ DOCX Utilities
 # ------------------------------------------------------------
@@ -30,10 +32,9 @@ def get_document_xml(docx_bytes):
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
         return z.read("word/document.xml"), z.namelist()
 
+
 def rebuild_docx_with_new_xml(template_bytes, new_xml, source_bytes=None):
     """Rebuild a DOCX with modified document.xml content and preserve relationships/media."""
-    import zipfile, io
-
     in_mem = io.BytesIO(template_bytes)
     out_mem = io.BytesIO()
     src_mem = io.BytesIO(source_bytes) if source_bytes else None
@@ -69,68 +70,73 @@ def rebuild_docx_with_new_xml(template_bytes, new_xml, source_bytes=None):
     out_mem.seek(0)
     return out_mem
 
-# ------------------------------------------------------------
-# 🧩 NEW Robust Injection Logic
-# ------------------------------------------------------------
-def inject_docx_content(template_bytes, source_bytes, placeholder="{{Permbajtja}}"):
+
+def merge_split_runs(tree, ns):
+    """Merge text runs so placeholders like {{Permbajtja}} can be detected even when split."""
+    for p in tree.findall(".//w:p", ns):
+        texts = []
+        for r in p.findall(".//w:t", ns):
+            texts.append(r.text or "")
+        full_text = "".join(texts)
+        yield p, full_text
+
+
+def replace_placeholder_in_xml(template_xml, source_xml, placeholder="{{Permbajtja}}"):
     """
-    Replaces placeholder paragraph with paragraphs from the source DOCX,
-    excluding <w:sectPr> to prevent duplicate section properties.
+    Finds a split placeholder like {{Permbajtja}} in the template DOCX and
+    replaces it with all paragraphs from the source DOCX body — safely.
+    Keeps final XML structure valid.
     """
-    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    ET.register_namespace("w", ns["w"])
+    try:
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        ET.register_namespace("w", ns["w"])
 
-    # Extract XMLs
-    with zipfile.ZipFile(io.BytesIO(template_bytes)) as zt:
-        template_xml = zt.read("word/document.xml").decode("utf-8")
-        template_files = {n: zt.read(n) for n in zt.namelist() if n.startswith("word/")}
+        template_tree = ET.fromstring(template_xml)
+        source_tree = ET.fromstring(source_xml)
 
-    with zipfile.ZipFile(io.BytesIO(source_bytes)) as zs:
-        source_xml = zs.read("word/document.xml").decode("utf-8")
+        template_body = template_tree.find(".//w:body", ns)
+        source_body = source_tree.find(".//w:body", ns)
 
-    template_tree = ET.fromstring(template_xml)
-    source_tree = ET.fromstring(source_xml)
+        if template_body is None or source_body is None:
+            print("⚠️ Missing body in one of the DOCX files.")
+            return template_xml
 
-    template_body = template_tree.find(".//w:body", ns)
-    source_body = source_tree.find(".//w:body", ns)
+        # Extract source content except sectPr (Word section properties)
+        source_elems = [
+            deepcopy(el) for el in list(source_body)
+            if not el.tag.endswith("sectPr")
+        ]
 
-    if template_body is None or source_body is None:
-        raise ValueError("Missing <w:body> in one of the documents")
+        # Locate the paragraph containing the placeholder (even if split)
+        for p, full_text in merge_split_runs(template_tree, ns):
+            if placeholder in full_text:
+                print("✅ Found placeholder in paragraph; replacing content...")
+                idx = list(template_body).index(p)
+                template_body.remove(p)
 
-    # ✅ Exclude <w:sectPr> from source
-    source_content = [deepcopy(el) for el in source_body if not el.tag.endswith("sectPr")]
+                # Insert each element from source
+                for el in source_elems:
+                    template_body.insert(idx, el)
+                    idx += 1
 
-    # ✅ Find paragraph with placeholder
-    target_p = None
-    for p in template_body.findall(".//w:p", ns):
-        merged = "".join([(t.text or "") for t in p.findall(".//w:t", ns)])
-        if placeholder in merged:
-            target_p = p
-            break
+                print("✅ Injection complete and structure preserved.")
 
-    if target_p is None:
-        raise ValueError(f"Placeholder '{placeholder}' not found in template")
+                merged_xml = ET.tostring(template_tree, encoding="utf-8", xml_declaration=True)
 
-    # ✅ Replace target paragraph with source content
-    children = list(template_body)
-    idx = children.index(target_p)
-    template_body.remove(target_p)
-    for i, el in enumerate(source_content):
-        template_body.insert(idx + i, el)
+                # Namespace cleanup for Word
+                merged_xml = re.sub(rb'xmlns:ns\d+="[^"]+"', b'', merged_xml)
+                merged_xml = re.sub(rb'ns\d+:', b'w:', merged_xml)
 
-    # ✅ Rebuild the DOCX
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zout:
-        for name, data in template_files.items():
-            if name == "word/document.xml":
-                zout.writestr(
-                    name,
-                    ET.tostring(template_tree, encoding="utf-8", xml_declaration=True)
-                )
-            else:
-                zout.writestr(name, data)
-    output.seek(0)
-    return output.getvalue()
+                return merged_xml
+
+        print("⚠️ Placeholder not found.")
+        return template_xml
+
+    except Exception as e:
+        print("❌ Replacement error:", e)
+        print(traceback.format_exc())
+        return template_xml
+
 
 # ------------------------------------------------------------
 # 🌐 Endpoints
@@ -140,12 +146,14 @@ def root():
     return jsonify({
         "status": "ok",
         "message": "DOCX Injector API (split-run safe) is running",
-        "endpoints": ["/inject-docx", "/debug-scan", "/debug-rebuild"]
+        "endpoints": ["/inject-docx", "/debug-scan", "/debug-find-placeholder", "/debug-rels"]
     })
+
 
 @app.route("/status", methods=["GET"])
 def status():
     return jsonify({"service": "docx-injector", "ok": True})
+
 
 @app.route("/inject-docx", methods=["POST"])
 def inject_docx():
@@ -158,6 +166,9 @@ def inject_docx():
     Returns: merged DOCX file
     """
     try:
+        print("FILES RECEIVED:", list(request.files.keys()))
+        print("FORM RECEIVED:", dict(request.form))
+
         if "template" not in request.files or "source" not in request.files:
             return jsonify({"error": "Both 'template' and 'source' are required"}), 400
 
@@ -165,12 +176,16 @@ def inject_docx():
         source_bytes = request.files["source"].read()
         placeholder = request.form.get("placeholder", "{{Permbajtja}}")
 
-        injected_bytes = inject_docx_content(template_bytes, source_bytes, placeholder)
+        template_xml, _ = get_document_xml(template_bytes)
+        source_xml, _ = get_document_xml(source_bytes)
+
+        new_xml = replace_placeholder_in_xml(template_xml, source_xml, placeholder)
+        merged_docx = rebuild_docx_with_new_xml(template_bytes, new_xml, source_bytes)
 
         return send_file(
-            io.BytesIO(injected_bytes),
+            merged_docx,
             as_attachment=True,
-            download_name="injected.docx",
+            download_name="merged.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
 
@@ -179,12 +194,10 @@ def inject_docx():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-# ------------------------------------------------------------
-# 🧪 Diagnostics
-# ------------------------------------------------------------
+
 @app.route("/debug-scan", methods=["POST"])
 def debug_scan():
-    """Scan for placeholder presence in a DOCX."""
+    """Scan DOCX and check if {{Permbajtja}} exists, even if split across runs."""
     try:
         if "file" not in request.files:
             return jsonify({"error": "Missing 'file'"}), 400
@@ -214,49 +227,10 @@ def debug_scan():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-@app.route("/debug-inject-test", methods=["POST"])
-def debug_inject_test():
-    """Same as before – diagnostic placeholder test."""
-    try:
-        if "template" not in request.files or "source" not in request.files:
-            return jsonify({"error": "Both 'template' and 'source' are required"}), 400
-
-        template_bytes = request.files["template"].read()
-        source_bytes = request.files["source"].read()
-        placeholder = request.form.get("placeholder", "{{Permbajtja}}")
-
-        # Extract XMLs
-        with zipfile.ZipFile(io.BytesIO(template_bytes)) as zt:
-            template_xml = zt.read("word/document.xml").decode("utf-8")
-
-        with zipfile.ZipFile(io.BytesIO(source_bytes)) as zs:
-            source_xml = zs.read("word/document.xml").decode("utf-8")
-
-        found_placeholder = placeholder in template_xml
-        found_fragments = "{{" in template_xml or "}}" in template_xml
-        has_body = "<w:body" in source_xml
-        para_count = source_xml.count("<w:p")
-
-        sample_template = "\n".join(template_xml.splitlines()[:10])
-        sample_source = "\n".join(source_xml.splitlines()[:10])
-
-        return jsonify({
-            "found_placeholder_exact": found_placeholder,
-            "found_placeholder_fragments": found_fragments,
-            "source_body_present": has_body,
-            "source_paragraphs_count": para_count,
-            "template_snippet": sample_template,
-            "source_snippet": sample_source
-        })
-
-    except Exception as e:
-        print("❌ Debug error:", e)
-        print(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/debug-find-placeholder", methods=["POST"])
 def debug_find_placeholder():
-    """Inspect all paragraphs and show merged text if placeholder fragments exist."""
+    """Inspect all paragraphs and detect placeholder fragments."""
     try:
         if "template" not in request.files:
             return jsonify({"error": "template file required"}), 400
@@ -273,9 +247,7 @@ def debug_find_placeholder():
 
         paragraphs = []
         for p in tree.findall(".//w:p", ns):
-            texts = []
-            for r in p.findall(".//w:t", ns):
-                texts.append(r.text or "")
+            texts = [r.text or "" for r in p.findall(".//w:t", ns)]
             merged = "".join(texts)
             if "Permbajtja" in merged or "{{" in merged or "}}" in merged:
                 paragraphs.append({
@@ -293,71 +265,10 @@ def debug_find_placeholder():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
-# ------------------------------------------------------------
-# 🧱 NEW Diagnostic: Debug Rebuild
-# ------------------------------------------------------------
-@app.route("/debug-rebuild", methods=["POST"])
-def debug_rebuild():
-    """
-    Upload a DOCX -> unzip and rezip -> confirm byte validity.
-    This checks if the rebuilding process itself introduces corruption.
-    """
-    try:
-        if "file" not in request.files:
-            return jsonify({"error": "Missing 'file'"}), 400
-
-        file_bytes = request.files["file"].read()
-
-        # Extract all
-        with zipfile.ZipFile(io.BytesIO(file_bytes), "r") as zin:
-            files = {n: zin.read(n) for n in zin.namelist()}
-
-        # Rebuild it
-        out_buf = io.BytesIO()
-        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
-            for n, b in files.items():
-                zout.writestr(n, b)
-
-        return jsonify({
-            "file_count": len(files),
-            "word_document_present": "word/document.xml" in files,
-            "rebuilt_size": len(out_buf.getvalue()),
-            "status": "ok - rebuild successful"
-        })
-    except Exception as e:
-        print("❌ Rebuild test failed:", e)
-        print(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/debug-extract-xml", methods=["POST"])
-def debug_extract_xml():
-    """
-    Upload a DOCX and extract both the start and end of word/document.xml
-    to detect malformed or duplicated closing tags (common corruption cause).
-    """
-    try:
-        if "file" not in request.files:
-            return jsonify({"error": "Missing 'file'"}), 400
-
-        docx_bytes = request.files["file"].read()
-        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
-            xml_bytes = z.read("word/document.xml")
-        xml_str = xml_bytes.decode("utf-8", errors="ignore")
-
-        return jsonify({
-            "length": len(xml_bytes),
-            "start": xml_str[:1500],
-            "end": xml_str[-1500:]
-        })
-
-    except Exception as e:
-        print("❌ Debug extract error:", e)
-        print(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/debug-rels", methods=["POST"])
 def debug_rels():
+    """List .rels files inside DOCX and show sample contents."""
     try:
         if "file" not in request.files:
             return jsonify({"error": "Missing 'file'"}), 400
@@ -371,6 +282,7 @@ def debug_rels():
         return jsonify({"rels_files": list(rels.keys()), "sample": rels})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # ------------------------------------------------------------
 # 🚀 Run locally
