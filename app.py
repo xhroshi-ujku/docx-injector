@@ -222,13 +222,16 @@ def replace_placeholder_in_xml(template_xml: bytes, source_xml: bytes, placehold
         t_body = t_root.find(".//w:body", NS)
         s_body = s_root.find(".//w:body", NS)
         if t_body is None or s_body is None:
+            print("❌ No <w:body> found in template or source.")
             return template_xml
 
         source_elems = [deepcopy(el) for el in list(s_body) if not el.tag.endswith("sectPr")]
 
+        found = False
         for p, merged_text in merge_split_runs(t_root):
             if placeholder in merged_text:
-                # remove the placeholder paragraph and insert source elements
+                found = True
+                print("✅ Placeholder replaced successfully. Inserted", len(source_elems), "elements.")
                 idx = list(t_body).index(p)
                 t_body.remove(p)
                 for el in source_elems:
@@ -236,13 +239,15 @@ def replace_placeholder_in_xml(template_xml: bytes, source_xml: bytes, placehold
                     idx += 1
                 return ET.tostring(t_root, encoding="utf-8", xml_declaration=True)
 
-        # not found
+        if not found:
+            print("⚠️ Placeholder not found in template. Check that '{{Permbajtja}}' exists in word/document.xml.")
         return template_xml
 
     except Exception as e:
         print("replace_placeholder_in_xml ERROR:", e)
         print(traceback.format_exc())
         return template_xml
+
 
 
 # ------------------------------------------------------------
@@ -364,5 +369,6 @@ def debug_rels():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
