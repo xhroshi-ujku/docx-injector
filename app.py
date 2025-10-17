@@ -37,11 +37,17 @@ def replace_placeholder_with_html(doc: Document, placeholder: str, html: str):
                 p.add_run(before)
                 p.add_run().add_break()
 
-            # Create a temporary document with the HTML content
+            # Create a temporary document with the HTML
             tmp_doc = Document()
-            html2docx.add_html_to_document(html, tmp_doc)
+            try:
+                html2docx.add_html_to_document(html, tmp_doc)
+            except Exception as err:
+                print("❌ HTML conversion error:", err)
+                print(traceback.format_exc())
+                tmp_doc.add_paragraph("[HTML conversion failed: content inserted as plain text]")
+                tmp_doc.add_paragraph(html)
 
-            # Insert HTML blocks into the main document
+            # Insert each element from tmp_doc into the main document
             anchor = p._p
             for block in tmp_doc.element.body:
                 anchor.addnext(block)
@@ -52,7 +58,7 @@ def replace_placeholder_with_html(doc: Document, placeholder: str, html: str):
                 anchor.addnext(new_para._p)
             return True
     return False
-
+    
 
 # --------------------------
 # 🌐 Endpoints
@@ -167,3 +173,4 @@ def inject_multi():
 # --------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
