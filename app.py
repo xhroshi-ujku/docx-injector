@@ -25,6 +25,36 @@ def require_api_key():
 # ------------------------------------------------------------
 # 🧩 Routes
 # ------------------------------------------------------------
+@app.route("/debug-scan", methods=["POST"])
+def debug_scan():
+    """
+    Scans ALL XML files in the uploaded DOCX for the placeholder string {{Permbajtja}}.
+    Returns a list of XML parts that contain it.
+    """
+    try:
+        if "template" not in request.files:
+            return jsonify({"error": "Upload 'template' file"}), 400
+
+        data = request.files["template"].read()
+        hits = []
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for name in z.namelist():
+                if name.endswith(".xml"):
+                    try:
+                        content = z.read(name).decode("utf-8", errors="replace")
+                        if "{{Permbajtja}}" in content:
+                            hits.append(name)
+                    except Exception as inner:
+                        print(f"⚠️ Could not read {name}: {inner}")
+
+        return jsonify({"found_in": hits})
+    except Exception as e:
+        print("❌ ERROR in debug-scan:", e)
+        print(traceback.format_exc())
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 @app.route("/debug-upload", methods=["POST"])
 def debug_upload():
     try:
@@ -138,3 +168,4 @@ def inject_docx():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
