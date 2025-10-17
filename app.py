@@ -306,10 +306,31 @@ def debug_rebuild():
         print("❌ Rebuild test failed:", e)
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+@app.route("/debug-extract-xml", methods=["POST"])
+def debug_extract_xml():
+    """
+    Upload the injected.docx and extract its word/document.xml for inspection.
+    """
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "Missing 'file'"}), 400
+
+        docx_bytes = request.files["file"].read()
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
+            xml_bytes = z.read("word/document.xml")
+        return jsonify({
+            "xml_preview": xml_bytes.decode("utf-8", errors="ignore")[:2000],
+            "length": len(xml_bytes)
+        })
+    except Exception as e:
+        print("❌ Debug extract error:", e)
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
 
 # ------------------------------------------------------------
 # 🚀 Run locally
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
