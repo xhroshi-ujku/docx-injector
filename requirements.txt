@@ -1,4 +1,2 @@
 flask
 python-docx
-html2docx
-beautifulsoup4
