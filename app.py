@@ -253,6 +253,46 @@ def debug_inject_test():
         print("❌ Debug error:", e)
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+@app.route("/debug-find-placeholder", methods=["POST"])
+def debug_find_placeholder():
+    """
+    Inspect all paragraphs (<w:p>) and check which ones contain placeholder fragments.
+    """
+    try:
+        if "template" not in request.files:
+            return jsonify({"error": "template file required"}), 400
+
+        placeholder = request.form.get("placeholder", "{{Permbajtja}}")
+        template_bytes = request.files["template"].read()
+
+        with zipfile.ZipFile(io.BytesIO(template_bytes)) as z:
+            xml_str = z.read("word/document.xml").decode("utf-8")
+
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        ET.register_namespace("w", ns["w"])
+        tree = ET.fromstring(xml_str)
+
+        paragraphs = []
+        for p in tree.findall(".//w:p", ns):
+            texts = []
+            for r in p.findall(".//w:t", ns):
+                texts.append(r.text or "")
+            merged = "".join(texts)
+            if "Permbajtja" in merged or "{{" in merged or "}}" in merged:
+                paragraphs.append({
+                    "merged_text": merged,
+                    "raw_xml_snippet": ET.tostring(p, encoding="unicode")[:500]
+                })
+
+        return jsonify({
+            "placeholder_paragraphs_found": len(paragraphs),
+            "paragraphs": paragraphs[:3]  # show max 3 for readability
+        })
+
+    except Exception as e:
+        print("❌ Debug error:", e)
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
 
 
 # ------------------------------------------------------------
@@ -260,6 +300,7 @@ def debug_inject_test():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
