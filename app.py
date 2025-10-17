@@ -210,7 +210,8 @@ def rebuild_docx(template_bytes: bytes, updated_document_xml: bytes, extra_files
 
 def replace_placeholder_in_xml(template_xml: bytes, source_xml: bytes, placeholder="{{Permbajtja}}") -> bytes:
     """
-    Replace the paragraph containing the placeholder with the source body contents (except sectPr).
+    Replace the content control (<w:sdt>) whose alias/tag equals 'Permbajtja'
+    with all body elements from the source document.
     """
     try:
         ET.register_namespace("w", W_NS)
@@ -225,23 +226,36 @@ def replace_placeholder_in_xml(template_xml: bytes, source_xml: bytes, placehold
             print("❌ No <w:body> found in template or source.")
             return template_xml
 
+        # Extract paragraphs from source (skip section props)
         source_elems = [deepcopy(el) for el in list(s_body) if not el.tag.endswith("sectPr")]
 
+        # Find the content control by alias/tag name
         found = False
-        for p, merged_text in merge_split_runs(t_root):
-            if placeholder in merged_text:
+        for sdt in t_body.findall(".//w:sdt", NS):
+            alias = sdt.find(".//w:alias", NS)
+            tag = sdt.find(".//w:tag", NS)
+            alias_val = alias.get(f"{{{W_NS}}}val") if alias is not None else None
+            tag_val = tag.get(f"{{{W_NS}}}val") if tag is not None else None
+
+            if alias_val == "Permbajtja" or tag_val == "Permbajtja":
                 found = True
-                print("✅ Placeholder replaced successfully. Inserted", len(source_elems), "elements.")
-                idx = list(t_body).index(p)
-                t_body.remove(p)
+                idx = list(t_body).index(sdt)
+                t_body.remove(sdt)
                 for el in source_elems:
                     t_body.insert(idx, el)
                     idx += 1
+                print(f"✅ Replaced content control 'Permbajtja' with {len(source_elems)} elements.")
                 return ET.tostring(t_root, encoding="utf-8", xml_declaration=True)
 
         if not found:
-            print("⚠️ Placeholder not found in template. Check that '{{Permbajtja}}' exists in word/document.xml.")
+            print("⚠️ No content control (w:sdt) with alias/tag 'Permbajtja' found in template.")
         return template_xml
+
+    except Exception as e:
+        print("replace_placeholder_in_xml ERROR:", e)
+        print(traceback.format_exc())
+        return template_xml
+
 
     except Exception as e:
         print("replace_placeholder_in_xml ERROR:", e)
@@ -369,6 +383,7 @@ def debug_rels():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
