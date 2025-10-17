@@ -162,7 +162,7 @@ def debug_scan():
     POST /debug-scan
     Multipart form-data:
       - file: DOCX file
-    Returns: JSON telling if {{Permbajtja}} exists in document.xml
+    Returns: JSON telling if {{Permbajtja}} exists, even if split across runs.
     """
     try:
         if "file" not in request.files:
@@ -172,13 +172,20 @@ def debug_scan():
         xml_bytes, names = get_document_xml(docx_bytes)
         xml_str = xml_bytes.decode("utf-8", errors="ignore")
 
-        found = "{{Permbajtja}}" in xml_str
-        print("🔍 Debug scan:", "found" if found else "not found")
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        tree = ET.fromstring(xml_bytes)
+        merged_texts = ["".join(r.text or "" for r in p.findall(".//w:t", ns))
+                        for p in tree.findall(".//w:p", ns)]
+        merged_full_text = " ".join(merged_texts)
+
+        found_literal = "{{Permbajtja}}" in xml_str
+        found_merged = "{{Permbajtja}}" in merged_full_text
 
         return jsonify({
-            "placeholder_in_document_xml": found,
-            "xml_length": len(xml_str),
-            "contains_word_document": "word/document.xml" in names
+            "contains_word_document": "word/document.xml" in names,
+            "found_literal": found_literal,
+            "found_merged_text": found_merged,
+            "xml_length": len(xml_str)
         })
 
     except Exception as e:
@@ -192,3 +199,4 @@ def debug_scan():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
