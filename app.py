@@ -334,12 +334,28 @@ def debug_extract_xml():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
+@app.route("/debug-rels", methods=["POST"])
+def debug_rels():
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "Missing 'file'"}), 400
+        docx_bytes = request.files["file"].read()
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
+            files = z.namelist()
+            rels = {}
+            for name in files:
+                if "rels" in name:
+                    rels[name] = z.read(name).decode("utf-8", errors="ignore")[:1000]
+        return jsonify({"rels_files": list(rels.keys()), "sample": rels})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ------------------------------------------------------------
 # 🚀 Run locally
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
 
 
