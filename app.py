@@ -1,16 +1,14 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, abort
 from docx import Document
 import html2docx
-import io, zipfile, re
-import os
-from flask import abort
-import traceback
-print("ERROR:", e)
-print(traceback.format_exc())
+import io, os, json, traceback
 
+app = Flask(__name__)
 
+# --------------------------
+# 🔑 API Key
+# --------------------------
 API_KEY = os.environ.get("DOCX_API_KEY", "eNdertuamFshatinEBemeQytetPartiNenaNenaJonePerjete1997")
-
 
 @app.before_request
 def require_api_key():
@@ -20,7 +18,6 @@ def require_api_key():
     key = request.headers.get("x-api-key")
     if key != API_KEY:
         abort(401, description="Invalid or missing API key")
-# --------------------------
 
 
 # --------------------------
@@ -33,30 +30,28 @@ def replace_placeholder_with_html(doc: Document, placeholder: str, html: str):
     """
     for i, p in enumerate(doc.paragraphs):
         if placeholder in p.text:
-            # Split the paragraph around the placeholder
             before, sep, after = p.text.partition(placeholder)
             p.clear()
+
             if before:
                 p.add_run(before)
                 p.add_run().add_break()
 
-            # Create a temporary document with the HTML
+            # Create a temporary document with the HTML content
             tmp_doc = Document()
             html2docx.add_html_to_document(html, tmp_doc)
 
-            # Insert each element from tmp_doc into the main document
+            # Insert HTML blocks into the main document
             anchor = p._p
             for block in tmp_doc.element.body:
                 anchor.addnext(block)
                 anchor = block
 
-            # Add text after placeholder, if any
             if after:
                 new_para = doc.add_paragraph(after)
                 anchor.addnext(new_para._p)
             return True
     return False
-# --------------------------
 
 
 # --------------------------
@@ -86,19 +81,25 @@ def inject():
       - html: string (HTML content)
     Returns a modified DOCX file.
     """
-    if "template" not in request.files:
-        return jsonify({"error": "Missing 'template' file"}), 400
-
-    template_file = request.files["template"]
-    placeholder = request.form.get("placeholder", "{{Permbajtja}}")
-    html = request.form.get("html", "")
-
     try:
+        print("FILES RECEIVED:", list(request.files.keys()))
+        print("FORM RECEIVED:", dict(request.form))
+
+        if "template" not in request.files:
+            return jsonify({"error": "Missing 'template' file"}), 400
+
+        template_file = request.files["template"]
+        placeholder = request.form.get("placeholder", "{{Permbajtja}}")
+        html = request.form.get("html", "")
+
+        # Load DOCX from uploaded file
         doc = Document(io.BytesIO(template_file.read()))
+
         ok = replace_placeholder_with_html(doc, placeholder, html)
         if not ok:
             return jsonify({"error": f"Placeholder '{placeholder}' not found"}), 400
 
+        # Save the updated DOCX to memory
         output = io.BytesIO()
         doc.save(output)
         output.seek(0)
@@ -109,7 +110,10 @@ def inject():
             download_name="injected.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
     except Exception as e:
+        print("ERROR:", e)
+        print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
@@ -122,16 +126,17 @@ def inject_multi():
       - map: JSON array of objects [{"placeholder": "...", "html": "..."}]
     Returns a modified DOCX with multiple replacements.
     """
-    import json
-
-    if "template" not in request.files:
-        return jsonify({"error": "Missing 'template' file"}), 400
-
-    template_file = request.files["template"]
-    mapping_raw = request.form.get("map", "[]")
-
     try:
+        print("FILES RECEIVED:", list(request.files.keys()))
+        print("FORM RECEIVED:", dict(request.form))
+
+        if "template" not in request.files:
+            return jsonify({"error": "Missing 'template' file"}), 400
+
+        template_file = request.files["template"]
+        mapping_raw = request.form.get("map", "[]")
         mapping = json.loads(mapping_raw)
+
         doc = Document(io.BytesIO(template_file.read()))
 
         for m in mapping:
@@ -150,9 +155,11 @@ def inject_multi():
             download_name="injected.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+
     except Exception as e:
+        print("ERROR:", e)
+        print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
-# --------------------------
 
 
 # --------------------------
