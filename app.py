@@ -2,6 +2,36 @@ from flask import Flask, request, send_file, jsonify, abort
 import io, os, zipfile, traceback
 from copy import deepcopy
 from lxml import etree as ET   # ✅ use lxml instead of xml.etree
+from base64 import b64encode
+import zipfile
+
+@app.route("/debug-upload", methods=["POST"])
+def debug_upload():
+    """
+    Returns: which files were received, their sizes, and whether {{Permbajtja}}
+    exists in word/document.xml (plus a short snippet).
+    """
+    try:
+        summary = {"files": list(request.files.keys()), "form": dict(request.form), "details": {}}
+        for key in request.files:
+            f = request.files[key]
+            data = f.read()
+            info = {
+                "filename": f.filename,
+                "size_bytes": len(data),
+                "content_type": f.content_type,
+            }
+            try:
+                with zipfile.ZipFile(io.BytesIO(data)) as z:
+                    xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+                    info["placeholder_in_document_xml"] = ("{{Permbajtja}}" in xml)
+                    info["document_xml_snippet"] = xml[:600]
+            except Exception as ex:
+                info["document_xml_error"] = str(ex)
+            summary["details"][key] = info
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 app = Flask(__name__)
 
@@ -159,3 +189,4 @@ def inject_docx():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
