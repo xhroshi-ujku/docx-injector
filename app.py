@@ -52,63 +52,62 @@ def rebuild_docx_with_new_xml(template_bytes, new_xml):
 # ------------------------------------------------------------
 def inject_docx_content(template_bytes, source_bytes, placeholder="{{Permbajtja}}"):
     """
-    Safely replaces placeholder (even if split across runs) with paragraphs from the source DOCX.
-    Preserves section properties and ensures valid XML structure.
+    Replaces placeholder paragraph with paragraphs from the source DOCX,
+    excluding <w:sectPr> to prevent duplicate section properties.
     """
-    import io
-    from xml.etree import ElementTree as ET
-
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
     ET.register_namespace("w", ns["w"])
 
-    # Extract XMLs and all files from the DOCX archives
+    # Extract XMLs
     with zipfile.ZipFile(io.BytesIO(template_bytes)) as zt:
         template_xml = zt.read("word/document.xml").decode("utf-8")
-        rels = {n: zt.read(n) for n in zt.namelist() if n.startswith("word/")}
+        template_files = {n: zt.read(n) for n in zt.namelist() if n.startswith("word/")}
 
     with zipfile.ZipFile(io.BytesIO(source_bytes)) as zs:
         source_xml = zs.read("word/document.xml").decode("utf-8")
 
-    # Parse both XMLs
     template_tree = ET.fromstring(template_xml)
     source_tree = ET.fromstring(source_xml)
 
-    # Get bodies
     template_body = template_tree.find(".//w:body", ns)
     source_body = source_tree.find(".//w:body", ns)
 
     if template_body is None or source_body is None:
         raise ValueError("Missing <w:body> in one of the documents")
 
-    # Get source paragraphs (excluding <w:sectPr>)
-    source_paragraphs = [deepcopy(el) for el in list(source_body) if not el.tag.endswith("sectPr")]
+    # ✅ Exclude <w:sectPr> from source
+    source_content = [deepcopy(el) for el in source_body if not el.tag.endswith("sectPr")]
 
-    # Find the paragraph that contains the merged placeholder text
-    placeholder_paragraph = None
+    # ✅ Find paragraph with placeholder
+    target_p = None
     for p in template_body.findall(".//w:p", ns):
-        merged_text = "".join([(t.text or "") for t in p.findall(".//w:t", ns)])
-        if merged_text.strip() == placeholder:
-            placeholder_paragraph = p
+        merged = "".join([(t.text or "") for t in p.findall(".//w:t", ns)])
+        if placeholder in merged:
+            target_p = p
             break
 
-    if not placeholder_paragraph:
+    if target_p is None:
         raise ValueError(f"Placeholder '{placeholder}' not found in template")
 
-    # Replace placeholder paragraph with source paragraphs
+    # ✅ Replace target paragraph with source content
     children = list(template_body)
-    idx = children.index(placeholder_paragraph)
-    template_body.remove(placeholder_paragraph)
-    for i, para in enumerate(source_paragraphs):
-        template_body.insert(idx + i, para)
+    idx = children.index(target_p)
+    template_body.remove(target_p)
+    for i, el in enumerate(source_content):
+        template_body.insert(idx + i, el)
 
-    # Rebuild DOCX
+    # ✅ Rebuild the DOCX
     output = io.BytesIO()
-    with zipfile.ZipFile(output, "w") as zout:
-        for name, data in rels.items():
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in template_files.items():
             if name == "word/document.xml":
-                zout.writestr(name, ET.tostring(template_tree, encoding="utf-8", xml_declaration=True))
+                zout.writestr(
+                    name,
+                    ET.tostring(template_tree, encoding="utf-8", xml_declaration=True)
+                )
             else:
                 zout.writestr(name, data)
+    output.seek(0)
     return output.getvalue()
 
 # ------------------------------------------------------------
@@ -313,3 +312,4 @@ def debug_rebuild():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
