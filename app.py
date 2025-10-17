@@ -30,19 +30,41 @@ def get_document_xml(docx_bytes):
     with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
         return z.read("word/document.xml"), z.namelist()
 
-def rebuild_docx_with_new_xml(template_bytes, new_xml):
-    """Rebuild a DOCX with modified document.xml content."""
+def rebuild_docx_with_new_xml(template_bytes, new_xml, source_bytes=None):
+    """Rebuild a DOCX with modified document.xml content and preserve relationships/media."""
+    import zipfile, io
+
     in_mem = io.BytesIO(template_bytes)
     out_mem = io.BytesIO()
+    src_mem = io.BytesIO(source_bytes) if source_bytes else None
 
     with zipfile.ZipFile(in_mem, "r") as zin, zipfile.ZipFile(
         out_mem, "w", zipfile.ZIP_DEFLATED
     ) as zout:
+
+        template_files = set(zin.namelist())
+        source_files = set()
+
+        # If a source DOCX is provided, list its files
+        if src_mem:
+            with zipfile.ZipFile(src_mem, "r") as zsrc:
+                source_files = set(zsrc.namelist())
+
+        # Write all template files, replacing only document.xml
         for item in zin.infolist():
             if item.filename != "word/document.xml":
                 zout.writestr(item, zin.read(item.filename))
             else:
                 zout.writestr("word/document.xml", new_xml)
+
+        # Copy missing files (e.g. images, rels) from source
+        if src_mem:
+            with zipfile.ZipFile(src_mem, "r") as zsrc:
+                for fname in source_files - template_files:
+                    try:
+                        zout.writestr(fname, zsrc.read(fname))
+                    except KeyError:
+                        pass  # skip if not accessible
 
     out_mem.seek(0)
     return out_mem
@@ -355,7 +377,3 @@ def debug_rels():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
-
-
-
