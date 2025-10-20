@@ -7,34 +7,47 @@ import os
 
 app = Flask(__name__)
 
+# ✅ Set your secret API key (you’ll also set this in Render dashboard as ENV var)
+API_KEY = os.environ.get("API_KEY", "super-secret-key")
+
+@app.before_request
+def verify_api_key():
+    # Skip check for the home page
+    if request.path == "/":
+        return None
+
+    # Check for API key in headers
+    client_key = request.headers.get("X-API-Key")
+    if not client_key or client_key != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+
 @app.route("/inject-docx", methods=["POST"])
 def inject_docx():
     try:
-        # Parse incoming JSON
         data = request.get_json(force=True)
-        print("📦 Incoming JSON:", data.keys())
+        print("📦 Incoming JSON:", list(data.keys()))
 
-        # Validate required fields
+        # Validate required base64 files
         if "template" not in data:
             return jsonify({"error": "Missing 'template' (Base64 of template.docx)"}), 400
         if "source" not in data:
             return jsonify({"error": "Missing 'source' (Base64 of source.docx)"}), 400
 
-        # Decode and write template.docx to temp file
+        # Decode template.docx
         tpl_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
         tpl_temp.write(base64.b64decode(data["template"]))
         tpl_temp.close()
 
-        # Decode and write source.docx to temp file
+        # Decode source.docx
         src_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
         src_temp.write(base64.b64decode(data["source"]))
         src_temp.close()
 
-        # Load template dynamically
+        # Load template
         tpl = DocxTemplate(tpl_temp.name)
         subdoc = tpl.new_subdoc(src_temp.name)
 
-        # Build context for placeholders
+        # Prepare placeholders
         context = {
             "Number": data.get("Number", ""),
             "Date": data.get("Date", ""),
@@ -48,12 +61,11 @@ def inject_docx():
             "Aprovoi": data.get("Aprovoi", "")
         }
 
-        # Render and save output
         tpl.render(context)
         output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
         tpl.save(output_file.name)
 
-        # Clean up temp template and source
+        # Cleanup
         os.remove(tpl_temp.name)
         os.remove(src_temp.name)
 
@@ -68,14 +80,11 @@ def inject_docx():
     except Exception as e:
         print("❌ ERROR:", e)
         print(traceback.format_exc())
-        return jsonify({
-            "error": str(e),
-            "trace": traceback.format_exc()
-        }), 500
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "ok", "message": "Dynamic DOCX merge API is running."})
+    return jsonify({"status": "ok", "message": "DOCX merge API is running securely."})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
