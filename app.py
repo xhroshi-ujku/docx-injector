@@ -39,5 +39,3 @@ try:
 except Exception as e:
     print("❌ ERROR:", e)
     print(traceback.format_exc())
-
-input("\nPress ENTER to exit...")
