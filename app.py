@@ -32,30 +32,31 @@ def inject_with_template(template_path, source_path, output_path, placeholder="m
     Template must include: {{ p(my_content) }}
     """
     try:
-        print("=== DEBUG: Starting injection ===", flush=True)
-        print(f"Template: {template_path}", flush=True)
-        print(f"Source:   {source_path}", flush=True)
-        print(f"Output:   {output_path}", flush=True)
-        print(f"Placeholder: {placeholder}", flush=True)
-
+        print("=== DEBUG: Loading template ===", flush=True)
         tpl = DocxTemplate(template_path)
+        if not tpl.docx:
+            raise RuntimeError("Template failed to load — invalid or corrupted DOCX")
+
+        print("DEBUG: Template loaded successfully", flush=True)
+
+        # Register helper for {{ p(...) }}
+        from docxtpl import RichText
         tpl.render_jinja_env.globals['p'] = tpl.build_paragraph
-        print("DEBUG: Template loaded and p() registered", flush=True)
 
+        print("DEBUG: Creating subdoc", flush=True)
         subdoc = tpl.new_subdoc(source_path)
-        print("DEBUG: Created subdoc successfully", flush=True)
 
+        print("DEBUG: Rendering context", flush=True)
         tpl.render({placeholder: subdoc})
-        print("DEBUG: Rendered context successfully", flush=True)
 
+        print("DEBUG: Saving output", flush=True)
         tpl.save(output_path)
-        print("DEBUG: tpl.save() executed", flush=True)
 
         if os.path.exists(output_path):
-            print("✅ File saved successfully:", output_path, flush=True)
+            print(f"✅ Successfully saved merged docx at {output_path}", flush=True)
             return True
         else:
-            print("❌ tpl.save() did not create the file!", flush=True)
+            print("❌ tpl.save() did not produce file", flush=True)
             return False
 
     except Exception as e:
@@ -134,4 +135,5 @@ def status():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
