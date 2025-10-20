@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 
 # ✅ Set your secret API key (you’ll also set this in Render dashboard as ENV var)
-API_KEY = os.environ.get("API_KEY", "super-secret-key")
+API_KEY = os.environ.get("API_KEY", "eNdertuamFshatinEBemeQytetPartiNenaNenaJonePerjete1997")
 
 @app.before_request
 def verify_api_key():
@@ -89,3 +89,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
