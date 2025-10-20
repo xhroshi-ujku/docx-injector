@@ -39,18 +39,26 @@ def inject_with_template(template_path, source_path, output_path, placeholder="m
 
         # Inject it into the placeholder context
         context = {placeholder: subdoc}
+
+        print(f"🔍 Rendering template using placeholder: {placeholder}")
+        print(f"📄 Template: {template_path}")
+        print(f"📄 Source: {source_path}")
+
         tpl.render(context)
         tpl.save(output_path)
-        print(f"✅ Injected '{placeholder}' from '{source_path}' into '{template_path}' → '{output_path}'", flush=True)
+
+        print(f"✅ Successfully injected '{placeholder}' from '{source_path}' into '{template_path}' → '{output_path}'", flush=True)
         return True
+
     except Exception as e:
         print("❌ Injection error:", e)
-        print(traceback.format_exc())
-        return False
+        print(traceback.format_exc(), flush=True)
+        # Return error details for better client-side debugging
+        raise Exception(f"Injection failed: {str(e)}")
 
 
 # ------------------------------------------------------------
-# Flask endpoint
+# Flask endpoints
 # ------------------------------------------------------------
 @app.route("/inject-docx", methods=["POST"])
 def inject_docx():
@@ -76,10 +84,17 @@ def inject_docx():
         template_file.save(template_path)
         source_file.save(source_path)
 
-        ok = inject_with_template(template_path, source_path, output_path, placeholder)
-        if not ok:
-            return jsonify({"error": "Injection failed"}), 500
+        try:
+            inject_with_template(template_path, source_path, output_path, placeholder)
+        except Exception as e:
+            # Capture internal injection error
+            print("❌ Internal injection error:", e, flush=True)
+            return jsonify({
+                "error": "Injection failed",
+                "details": str(e)
+            }), 500
 
+        # Return merged file if all went well
         return send_file(
             output_path,
             as_attachment=True,
@@ -88,17 +103,21 @@ def inject_docx():
         )
 
     except Exception as e:
-        print("❌ ERROR:", e)
-        print(traceback.format_exc())
+        print("❌ General error:", e)
+        print(traceback.format_exc(), flush=True)
         return jsonify({"error": str(e)}), 500
 
 
+# ------------------------------------------------------------
+# Status & Root endpoints
+# ------------------------------------------------------------
 @app.route("/", methods=["GET"])
 def root():
     return jsonify({
         "service": "docx-jinja-injector",
         "ok": True,
-        "usage": "POST /inject-docx with form-data: template, source, [placeholder]"
+        "usage": "POST /inject-docx with form-data: template, source, [placeholder]",
+        "example_placeholder": "{{ p my_content }}"
     })
 
 
@@ -107,6 +126,8 @@ def status():
     return jsonify({"service": "docx-jinja-injector", "ok": True})
 
 
+# ------------------------------------------------------------
+# Run locally or on Render
+# ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
