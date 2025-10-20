@@ -1,41 +1,76 @@
+from flask import Flask, request, send_file, jsonify
 from docxtpl import DocxTemplate
 import traceback
+import base64
+import tempfile
 import os
 
-print("🧩 Starting document merge test...")
+app = Flask(__name__)
 
-try:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+@app.route("/inject-docx", methods=["POST"])
+def inject_docx():
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        template_path = os.path.join(base_dir, "template.docx")
 
-    template_path = os.path.join(base_dir, "template.docx")
-    source_path = os.path.join(base_dir, "source.docx")
+        if not os.path.exists(template_path):
+            return jsonify({"error": "template.docx not found"}), 404
 
-    tpl = DocxTemplate(template_path)
-    print("✅ Template loaded")
+        # Parse JSON input
+        data = request.get_json(force=True)
+        print("📦 Incoming JSON:", data)
 
-    permbajtja = tpl.new_subdoc(source_path)
-    print("✅ Subdocument created")
+        # Optional: handle base64-encoded source.docx
+        source_docx_path = None
+        if "Permbajtja" in data and isinstance(data["Permbajtja"], str) and data["Permbajtja"].startswith("UEs"):
+            # Save base64 string as temporary source.docx
+            decoded = base64.b64decode(data["Permbajtja"])
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+            tmp.write(decoded)
+            tmp.close()
+            source_docx_path = tmp.name
+        else:
+            # fallback to local source.docx
+            source_docx_path = os.path.join(base_dir, "source.docx")
 
-    context = {
-        "Number": "123/2025",
-        "Date": "20/10/2025",
-        "Drejtuar": "Drejtoria e Burimeve Njerëzore",
-        "Per_dijeni": "Departamenti i Financës",
-        "Subjekti": "Njoftim mbi ndryshimet organizative",
-        "Data_Efektive": "25/10/2025",
-        "Data_e_Publikimit": "21/10/2025",
-        "Permbajtja": permbajtja,
-        "Pergatiti": "Xhenis Roshi",
-        "Aprovoi": "Elira Dervishi"
-    }
+        tpl = DocxTemplate(template_path)
+        subdoc = tpl.new_subdoc(source_docx_path)
 
-    tpl.render(context)
-    print("✅ Rendered successfully")
+        context = {
+            "Number": data.get("Number", ""),
+            "Date": data.get("Date", ""),
+            "Drejtuar": data.get("Drejtuar", ""),
+            "Per_dijeni": data.get("Per_dijeni", ""),
+            "Subjekti": data.get("Subjekti", ""),
+            "Data_Efektive": data.get("Data_Efektive", ""),
+            "Data_e_Publikimit": data.get("Data_e_Publikimit", ""),
+            "Permbajtja": subdoc,
+            "Pergatiti": data.get("Pergatiti", ""),
+            "Aprovoi": data.get("Aprovoi", "")
+        }
 
-    output_path = os.path.join(base_dir, "merged.docx")
-    tpl.save(output_path)
-    print(f"🎉 merged.docx created successfully at {output_path}")
+        tpl.render(context)
 
-except Exception as e:
-    print("❌ ERROR:", e)
-    print(traceback.format_exc())
+        output_path = os.path.join(base_dir, "merged.docx")
+        tpl.save(output_path)
+        print("🎉 Document created successfully")
+
+        return send_file(
+            output_path,
+            as_attachment=True,
+            download_name="merged.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+    except Exception as e:
+        print("❌ ERROR:", e)
+        print(traceback.format_exc())
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"status": "ok", "message": "DOCX merge API is running."})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
