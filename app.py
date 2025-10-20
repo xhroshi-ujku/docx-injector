@@ -1,8 +1,8 @@
 from flask import Flask, request, send_file, jsonify
 from docxtpl import DocxTemplate
-import traceback
-import base64
 import tempfile
+import base64
+import traceback
 import os
 
 app = Flask(__name__)
@@ -10,32 +10,31 @@ app = Flask(__name__)
 @app.route("/inject-docx", methods=["POST"])
 def inject_docx():
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        template_path = os.path.join(base_dir, "template.docx")
-
-        if not os.path.exists(template_path):
-            return jsonify({"error": "template.docx not found"}), 404
-
-        # Parse JSON input
+        # Parse incoming JSON
         data = request.get_json(force=True)
-        print("📦 Incoming JSON:", data)
+        print("📦 Incoming JSON:", data.keys())
 
-        # Optional: handle base64-encoded source.docx
-        source_docx_path = None
-        if "Permbajtja" in data and isinstance(data["Permbajtja"], str) and data["Permbajtja"].startswith("UEs"):
-            # Save base64 string as temporary source.docx
-            decoded = base64.b64decode(data["Permbajtja"])
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-            tmp.write(decoded)
-            tmp.close()
-            source_docx_path = tmp.name
-        else:
-            # fallback to local source.docx
-            source_docx_path = os.path.join(base_dir, "source.docx")
+        # Validate required fields
+        if "template" not in data:
+            return jsonify({"error": "Missing 'template' (Base64 of template.docx)"}), 400
+        if "source" not in data:
+            return jsonify({"error": "Missing 'source' (Base64 of source.docx)"}), 400
 
-        tpl = DocxTemplate(template_path)
-        subdoc = tpl.new_subdoc(source_docx_path)
+        # Decode and write template.docx to temp file
+        tpl_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tpl_temp.write(base64.b64decode(data["template"]))
+        tpl_temp.close()
 
+        # Decode and write source.docx to temp file
+        src_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        src_temp.write(base64.b64decode(data["source"]))
+        src_temp.close()
+
+        # Load template dynamically
+        tpl = DocxTemplate(tpl_temp.name)
+        subdoc = tpl.new_subdoc(src_temp.name)
+
+        # Build context for placeholders
         context = {
             "Number": data.get("Number", ""),
             "Date": data.get("Date", ""),
@@ -49,14 +48,18 @@ def inject_docx():
             "Aprovoi": data.get("Aprovoi", "")
         }
 
+        # Render and save output
         tpl.render(context)
+        output_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tpl.save(output_file.name)
 
-        output_path = os.path.join(base_dir, "merged.docx")
-        tpl.save(output_path)
-        print("🎉 Document created successfully")
+        # Clean up temp template and source
+        os.remove(tpl_temp.name)
+        os.remove(src_temp.name)
 
+        print("🎉 Merged DOCX created successfully!")
         return send_file(
-            output_path,
+            output_file.name,
             as_attachment=True,
             download_name="merged.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -65,11 +68,14 @@ def inject_docx():
     except Exception as e:
         print("❌ ERROR:", e)
         print(traceback.format_exc())
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        return jsonify({
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }), 500
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "ok", "message": "DOCX merge API is running."})
+    return jsonify({"status": "ok", "message": "Dynamic DOCX merge API is running."})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
