@@ -32,28 +32,37 @@ def inject_with_template(template_path, source_path, output_path, placeholder="m
     Template must include: {{ p(my_content) }}
     """
     try:
+        print("=== DEBUG: Starting injection ===", flush=True)
+        print(f"Template: {template_path}", flush=True)
+        print(f"Source:   {source_path}", flush=True)
+        print(f"Output:   {output_path}", flush=True)
+        print(f"Placeholder: {placeholder}", flush=True)
+
         tpl = DocxTemplate(template_path)
-
-        # Register p() helper for subdocs
         tpl.render_jinja_env.globals['p'] = tpl.build_paragraph
+        print("DEBUG: Template loaded and p() registered", flush=True)
 
-        # Correct subdocument creation (docxtpl handles relationships)
         subdoc = tpl.new_subdoc(source_path)
+        print("DEBUG: Created subdoc successfully", flush=True)
 
-        # Render + Save
         tpl.render({placeholder: subdoc})
+        print("DEBUG: Rendered context successfully", flush=True)
+
         tpl.save(output_path)
+        print("DEBUG: tpl.save() executed", flush=True)
 
-        if not os.path.exists(output_path):
-            raise FileNotFoundError(f"Rendered file not found at {output_path}")
-
-        print(f"✅ Injected '{placeholder}' successfully into '{output_path}'", flush=True)
-        return True
+        if os.path.exists(output_path):
+            print("✅ File saved successfully:", output_path, flush=True)
+            return True
+        else:
+            print("❌ tpl.save() did not create the file!", flush=True)
+            return False
 
     except Exception as e:
-        print("❌ Injection error:", e)
-        print(traceback.format_exc())
+        print("❌ Injection error:", e, flush=True)
+        print(traceback.format_exc(), flush=True)
         return False
+
 
 
 # ------------------------------------------------------------
@@ -125,3 +134,4 @@ def status():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
