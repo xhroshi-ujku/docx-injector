@@ -31,30 +31,38 @@ def inject_with_template(template_path, source_path, output_path, placeholder="m
     Template must include: {{ p(my_content) }}
     """
     try:
-        from docxtpl import DocxTemplate, RichText, InlineImage
+        from docxtpl import DocxTemplate
+        from docx import Document
         from docxtpl.subdoc import Subdoc
 
         tpl = DocxTemplate(template_path)
 
-        # Register 'p' in Jinja2 environment
-        tpl.render_jinja_env.globals['p'] = tpl.build_paragraph  # this defines 'p(...)'
+        # Register 'p' so {{ p(...) }} works in Jinja2
+        tpl.render_jinja_env.globals['p'] = tpl.build_paragraph
 
-        # Create a subdoc from the source document
+        # Create a subdoc from the source file
         subdoc = tpl.new_subdoc()
         subdoc.subdocx = Document(source_path)
 
-        # Inject it into the placeholder context
+        # Build render context
         context = {placeholder: subdoc}
+
+        # Render + Save
         tpl.render(context)
         tpl.save(output_path)
 
-        print(f"✅ Injected '{placeholder}' from '{source_path}' into '{template_path}' → '{output_path}'", flush=True)
+        # Double-check file exists
+        if not os.path.exists(output_path):
+            raise FileNotFoundError(f"Rendered file not found at {output_path}")
+
+        print(f"✅ Successfully injected and saved → {output_path}", flush=True)
         return True
 
     except Exception as e:
         print("❌ Injection error:", e)
         print(traceback.format_exc())
         return False
+
 
 
 # ------------------------------------------------------------
@@ -131,4 +139,5 @@ def status():
 # ------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
 
