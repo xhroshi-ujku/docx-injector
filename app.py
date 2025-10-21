@@ -27,20 +27,22 @@ def inject_docx():
         data = request.get_json(force=True)
         print("📦 Incoming JSON:", list(data.keys()))
 
-        # Validate required base64 files
+        # Validate required template
         if "template" not in data:
             return jsonify({"error": "Missing 'template' (Base64 of template.docx)"}), 400
-        if "source" not in data:
-            return jsonify({"error": "Missing 'source' (Base64 of source.docx)"}), 400
 
         # Decode template.docx
         tpl_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
         tpl_temp.write(base64.b64decode(data["template"]))
         tpl_temp.close()
 
-        # Decode source.docx
+        # ✅ Decode Permbajtja (preferred) or fallback to source
+        src_base64 = data.get("Permbajtja") or data.get("source")
+        if not src_base64:
+            return jsonify({"error": "Missing 'Permbajtja' or 'source' (Base64 DOCX)"}), 400
+
         src_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-        src_temp.write(base64.b64decode(data["source"]))
+        src_temp.write(base64.b64decode(src_base64))
         src_temp.close()
 
         # Load template
@@ -89,4 +91,3 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
